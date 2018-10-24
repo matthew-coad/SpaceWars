@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+
+<head>
+
+<meta charset="utf-8" />
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<meta name="generator" content="pandoc" />
+
+
+<meta name="author" content="Matthew Coad" />
+
+<meta name="date" content="2018-10-22" />
+
+<title>Space Wars - The mysteries of code indentation revealed!</title>
+
+<script src="SpaceWars7_files/jquery-1.11.3/jquery.min.js"></script>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link href="SpaceWars7_files/bootstrap-3.3.5/css/bootstrap.min.css" rel="stylesheet" />
+<script src="SpaceWars7_files/bootstrap-3.3.5/js/bootstrap.min.js"></script>
+<script src="SpaceWars7_files/bootstrap-3.3.5/shim/html5shiv.min.js"></script>
+<script src="SpaceWars7_files/bootstrap-3.3.5/shim/respond.min.js"></script>
+<script src="SpaceWars7_files/navigation-1.1/tabsets.js"></script>
+<link href="SpaceWars7_files/highlightjs-9.12.0/default.css" rel="stylesheet" />
+<script src="SpaceWars7_files/highlightjs-9.12.0/highlight.js"></script>
+
+<style type="text/css">code{white-space: pre;}</style>
+<style type="text/css">
+  pre:not([class]) {
+    background-color: white;
+  }
+</style>
+<script type="text/javascript">
+if (window.hljs) {
+  hljs.configure({languages: []});
+  hljs.initHighlightingOnLoad();
+  if (document.readyState && document.readyState === "complete") {
+    window.setTimeout(function() { hljs.initHighlighting(); }, 0);
+  }
+}
+</script>
+
+
+
+<style type="text/css">
+h1 {
+  font-size: 34px;
+}
+h1.title {
+  font-size: 38px;
+}
+h2 {
+  font-size: 30px;
+}
+h3 {
+  font-size: 24px;
+}
+h4 {
+  font-size: 18px;
+}
+h5 {
+  font-size: 16px;
+}
+h6 {
+  font-size: 12px;
+}
+.table th:not([align]) {
+  text-align: left;
+}
+</style>
+
+
+</head>
+
+<body>
+
+<style type = "text/css">
+.main-container {
+  max-width: 940px;
+  margin-left: auto;
+  margin-right: auto;
+}
+code {
+  color: inherit;
+  background-color: rgba(0, 0, 0, 0.04);
+}
+img {
+  max-width:100%;
+  height: auto;
+}
+.tabbed-pane {
+  padding-top: 12px;
+}
+.html-widget {
+  margin-bottom: 20px;
+}
+button.code-folding-btn:focus {
+  outline: none;
+}
+</style>
+
+
+
+<div class="container-fluid main-container">
+
+<!-- tabsets -->
+<script>
+$(document).ready(function () {
+  window.buildTabsets("TOC");
+});
+</script>
+
+<!-- code folding -->
+
+
+
+
+
+
+<div class="fluid-row" id="header">
+
+
+
+<h1 class="title toc-ignore">Space Wars - The mysteries of code indentation revealed!</h1>
+<h4 class="author"><em>Matthew Coad</em></h4>
+<h4 class="date"><em>22 October 2018</em></h4>
+
+</div>
+
+
+<div id="introduction" class="section level1">
+<h1>Introduction</h1>
+<p>Some time last year I was starting out on the path of learning Predictive Modelling and I became intrigued by an analysis done on data from the 2017 StackOverflow survey. It appeated to show that developers that preferred to indent their code with spaces rather than tabs had a distinct salary advantage. The salary advantage was surprisingly persistence even when you attempted to account for variables like the country where the developer worked or how many years they had been working for.</p>
+<p>Its a little bit old news now but currently I’m polishing up a lot of my self-training data analyses to form a portfolio of work I can present to prospective employers. However upon inspection of this analysis, while it had some good ideas, had some issues. So I decided to revisit it with lessons I’ve learnt upon the way and some of the techniques and technologies I’ve developed since.</p>
+</div>
+<div id="lets-see-the-mystery" class="section level1">
+<h1>Lets see the mystery</h1>
+<p>So to start lets plot the salaries for all respondants divided into those who prefer to format their code with spaces versus those who prefer tabs.</p>
+<p><img src="SpaceWars7_files/figure-html/unnamed-chunk-2-1.png" width="672" /></p>
+<p>As you can see their is a marked difference in the reported salaries.</p>
+<div id="difference-between-countries" class="section level2">
+<h2>Difference between countries</h2>
+<p>An obvious question that often got raised when I worked on this problem was whether the country the respondant was working on had something to do with it. Maybe people in India had a marked preference and they were earning less?</p>
+<p>This question was part of the reason I standardized salaries per country and the difference is still there. However the difference in salaries is remarkedly persistent across countries as the following plot shows.</p>
+<p><img src="SpaceWars7_files/figure-html/unnamed-chunk-3-1.png" width="672" /></p>
+<p>To make the plot clearer I filtered this list to just the top 10 countries by number of respondants. But suffice it to say, space formatters making more money was consistent down the line.</p>
+</div>
+<div id="difference-with-years-of-experience" class="section level2">
+<h2>Difference with years of experience</h2>
+<p>Another obvious question is perhaps it had to do with how long a respondant had been working for. Maybe a space preference is “Old school” and people who have been working for longer definitly get paid more.</p>
+<p>However if you plot the salary preference by years of experience you get the following.</p>
+<p><img src="SpaceWars7_files/figure-html/unnamed-chunk-4-1.png" width="672" /></p>
+<p>Again you can see the space preference salary advantage is pretty consistent. You can slice and dice the data in a variety of ways but the salary advantage persists.</p>
+<p>Its readily apparent that space formatters earn more money than tab formatters. However the interesting question is why?</p>
+</div>
+</div>
+<div id="is-the-whitespace-preference-actually-important" class="section level1">
+<h1>Is the whitespace preference actually important?</h1>
+<p>What turned out to be an excellent data science exercise was to test the hypothesis “The formatting preference of developers effects their salary”.</p>
+<p>Even if we are pretty certain that code formatting preferences have little effect on developers salaries, it was an excellent data science exercise to demonstrate that the hypothesis “Formatting preferences have a significant effect on salaries” was false.</p>
+<p>To do this I performed the following machine learning experiment.</p>
+<p>First I created a dataset containing answers to the following questions which seemed to cover a large territory of likely influences of a persons salary:</p>
+<ul>
+<li>What is your code formatting preference?</li>
+<li>How many years experience do you have?</li>
+<li>What programming languages have you used?</li>
+<li>What development frameworks have you used?</li>
+<li>What databases have you used?</li>
+<li>What platforms have you developed for?</li>
+<li>What IDES have you used?</li>
+<li>What version management system do you use?</li>
+<li>What development methodology do you use?</li>
+<li>What is the size of the company you work for?</li>
+<li>To what level did you receive formal education?</li>
+<li>What did you major in at uni?</li>
+<li>What type of company do you work for?</li>
+<li>What type of developer are you?</li>
+<li>What is your gender?</li>
+</ul>
+<p>I then used a variety of algorithms to train a model that would predict the respondants salary. These are the “control” models.</p>
+<p>I then random shuffled the code formatting preference question and trained the models again. These are the “Shuffle treatment” models.</p>
+<p>The idea is that the random shuffling destroys any information that the whitespace question might be providing, while allowing us to fit the models in exactly the same way. If the whitespace preference is causing the salary difference then it should reduce the models predictive performance. And if it does not have a causal influence then both models should perform more or less the same.</p>
+<p>To get a distribution of performances to compare each model is trained 30 different times with different random subsets of the training data.</p>
+<p>The result of this modelling experiment is shown below:</p>
+<p><img src="SpaceWars7_files/figure-html/unnamed-chunk-5-1.png" width="672" /></p>
+<p>The control fits <em>possibly</em> show a slightly better performance than the shuffled models. However the difference is not significant, $17 on average, nothing like the dramatic difference we are looking for. Consequently it seems reasonable to assume that formatting preference has little causal influence on salaries. The whitespace preference appears to be dependant on the other variables. <em>Phew</em> it looks like common-sense actually prevails.</p>
+<p>The next question to answer is what is it dependant on.</p>
+</div>
+<div id="what-is-the-relationship-between-whitespace-preference-and-salary" class="section level1">
+<h1>What is the relationship between whitespace preference and salary?</h1>
+<p>Most of the questions listed above are actually one of a set of choices, with many being multiple choice.</p>
+<p>For example the “Which programming languages are you experience in” question allows you to pick multiple choices from a long list of possible programming languages. VB, C, C#, Java, Python and so on.</p>
+<p>We could get an idea of the effect of a particular programming language on whitespace preference by working out the ratio of Tabs versus Space for everyone who stated they worked with that language.</p>
+<p>Likewise we could get an idea of the influence on salaries by working out the mean salary for everyone for everyone for everyone who worked with that language.</p>
+<p>Then we could get an idea if there was any relationship between whitespace and programming languages in general by working out those value pairs for all programming languages and plotting them on scatter plot.</p>
+<p><img src="SpaceWars7_files/figure-html/unnamed-chunk-8-1.png" width="672" /></p>
+<p>This plot shows that their is a quite distinct relationship between white space preference and salary when it comes to programming languages. The points have a distinct trend and I’ve added a smoothing curve to highlight it. The grey bar gives the 95% confidence interval of where the trend line should sit. The size of the circle shows the number of respondants who have used that language.</p>
+<p>As an added bonus I used a clustering algorithm to find “associated” technologies. I’ve called this association “Tech families”. The name for each tech family is the top 3 answers associated with that tech family. Its pretty flacky but it seems to a bit of sense make sense.</p>
+<p>That clustering makes it easy to see some trends. A noteable one is that the “classic” Microsoft languages are associated with a low space preference and low salaries. The niche web-development languages seem to pay better and foster space formatting. There is quite a wide range of space preference probabilities with 70% of the old VB hackers using tabs and 70% of the young web-devs using spaces.</p>
+<div id="ide-summary-comparision" class="section level2">
+<h2>IDE Summary comparision</h2>
+<p>Lets repeat the scatter plot for the IDE’s that a developer has used.</p>
+<p><img src="SpaceWars7_files/figure-html/unnamed-chunk-9-1.png" width="672" /></p>
+<p>The distinct trend is still there. However the 95% confidence interval is now wider indicating its not so sure.</p>
+<p>The dev’s who’ve used the big mainstream IDE’s Visual Studio and Eclipse like tabs.</p>
+<p>The dev’s who have used the IDE’s based on Atom tend to sit more in the middle.</p>
+<p>Missing from this graph are developers who have used Emacs which sit beyond the top-right corner. They and the guys who have used Vim are really into formatting their code using spaces. Both Emacs and Vim aren’t GUI IDE’s. They both hail from text-terminal days and are still used when editing files using text shells.</p>
+<p>And again the tech families are tending to appear in the same place on the plot. This is not surprising because many of the programming languaged would be editted with there associated IDE’s.</p>
+<p>It might be that trend seen in the languages is actually a trend that follows from the text editing tools used to edit those languages. Its might be apparent in the language question because the ecosystem of programming languages is far more diverse and highlights the trend better.</p>
+</div>
+<div id="company-size-comparison" class="section level2">
+<h2>Company Size comparison</h2>
+<p>So far we’ve looked at the tech related questions seen most of the big contributors to the Tabs versus space renumeration differential. To show a variation I’ve included the “How big is the company you work for question”.</p>
+<p><img src="SpaceWars7_files/figure-html/unnamed-chunk-10-1.png" width="672" /></p>
+<p>It shows quite a different pattern. There is a pretty strong relationship between the size of the company and how much the employees get paid. But it has very little bearing on the whitespace preference.</p>
+<p>This plot demonstrates that its the tools that dev’s use really seem to matter.</p>
+</div>
+<div id="self-taught-type-comparison" class="section level2">
+<h2>Self Taught Type comparison</h2>
+<p>Its different again with the self taught type question.</p>
+<p><img src="SpaceWars7_files/figure-html/unnamed-chunk-11-1.png" width="672" /></p>
+<p>This time it makes little difference to either renumeration or whitespace preference.</p>
+</div>
+</div>
+<div id="conclusion---development-tools-matter-to-developers" class="section level1">
+<h1>Conclusion - Development tools matter to developers!</h1>
+<p>So whats the story behind this Tabs versus Spaces versus Salary puzzle.</p>
+<p>The story that makes sense to me is that its related to the development tools that developers use.</p>
+<p>That the IDE’s where divided into quite distinct groups was quite compelling. People still working with VBA having a space preference of 30%, the big Microsoft, Java and Apple IDE’s all sitting with about a 40% space preference, the Atom based IDE’s sitting at around 50% space preference and the old text-terminal IDE’s sitting at around 70-80% space preference.</p>
+<p>After all it makes sense that the tools being used to edit text promote certain text editing styles. And with only 4 major niches its quite easy for them to get arranged into that trend with salary by chance.</p>
+<p>I’ve looked at the other questions but it gets increasingly harder to pick out any trend. But the questions that you expect to have little relation to the toolsets like education level or race have little relationship to formatting preference.</p>
+<p>If anyones interested or has an idea leave a comment. But currently I’m not planning on anymore posts on this topic! I’ve spent way too much time on it already.</p>
+</div>
+
+
+
+
+</div>
+
+<script>
+
+// add bootstrap table styles to pandoc tables
+function bootstrapStylePandocTables() {
+  $('tr.header').parent('thead').parent('table').addClass('table table-condensed');
+}
+$(document).ready(function () {
+  bootstrapStylePandocTables();
+});
+
+
+</script>
+
+<!-- dynamically load mathjax for compatibility with self-contained -->
+<script>
+  (function () {
+    var script = document.createElement("script");
+    script.type = "text/javascript";
+    script.src  = "https://mathjax.rstudio.com/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML";
+    document.getElementsByTagName("head")[0].appendChild(script);
+  })();
+</script>
+
+</body>
+</html>
