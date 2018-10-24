@@ -1,0 +1,778 @@
+---
+title: "Space Wars - The mysteries of code indentation revealed!"
+author: "Matthew Coad"
+date: "24 September 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, echo=FALSE, include=FALSE}
+source("./Scripts/survey_load.R")
+source("./Scripts/survey_plots.R")
+source("./Scripts/survey_assemble.R")
+
+dollarFormat <- scales::dollar_format(largest_with_cents = 0)
+```
+
+**TODO** Reference source article
+
+Like many developers I was intrigued by the analysis done by *Ref here* on the data from the 2017 StackOverflow that showed that developers who preferred to indent their code with spaces rather than tabs
+had a distinct salary advantage. The salary advantage was surprisingly persistence even when you attempted to account for variables like the country the developer worked in or how many years they had 
+been working for.
+
+On the surface it seems very unlikely that a minor stylistic preference should have a dramatic effect on developers. As has been said many times on this issue "Causation is not effect", but the interesting question is..
+
+##What exactly is going on here?
+
+In statistical parlance the most likely explanation of the apparent correlation between indentation preference and salaries is a **confounding variable**. That under the covers there is some other variable that both
+indentation preference and salaries correlate with. An obvious example is the finding that ice-cream sales correlate with shark attacks. In this case the confounding variable might be "Is it perfect beach weather?".
+
+But *guessing* thats what it is and *demonstrating* are two different things. And if you write code for a living its a pretty interesting mystery. And I've spent a good part of this year studying up on data science and 
+I happen to be a domain expert on software development. So its a good problem to practice on. 
+
+Actually I lie. It was a *freaking* hard nut to crack and probably wasnt a good "starting" original analysis. On the other hand I got there in the end, and learned a whole bunch in the process so it turned out to be a good
+example, even if a bit insane.
+
+But I didn't t know that at the outset and at the time I said...
+
+##I'm going to have to data science the shit out of this!
+```{r, echo=FALSE}
+
+survey_df <- survey_assemble()
+df <- survey_df
+spaceSalary <- df %>% filter(Whitespace == "Spaces") %>% .$Salary %>% median()
+spaceCount <- df %>% filter(Whitespace == "Spaces") %>% nrow()
+tabsSalary <- df %>% filter(Whitespace == "Tabs") %>% .$Salary %>% median()
+tabsCount <- df %>% filter(Whitespace == "Tabs") %>% nrow()
+allRecordCount <- nrow(survey_df)
+
+```
+
+First step lets have a poke around in the data. Their are `r nrow(survey.alldata)` rows and `r ncol(survey.alldata)` columns. 
+However only `r sum(!is.na(survey.alldata$TabsSpaces) & !is.na(survey.alldata$Salary))` records have a salary and a identation preference record. 
+Their are tricks you can pull to deal with the missing data like filling it with the median or inferring it using a statistical model but lets 
+stay away from that and stick with the data where their is a salary and a indentation preference recorded. 
+
+Also their is a "Both" indentation option. This gives 3 choices for indentation preference. For "Reasons" its easier to work with two choices
+instead of three. And who wants to muck around with those namby pamby identation prevaricaters anyway. Lets get rid of them too.
+
+That gives us `r nrow(survey.data)` records to play with.
+
+Lets see the mystery!
+
+```{r, echo=FALSE}
+dfs <- df %>% group_by(Whitespace) %>% summarise(median = median(Salary), medianLabel = dollarFormat(median))
+df %>%
+    ggplot(aes(x = Whitespace, y = Salary)) +
+    geom_boxplot(aes(fill = Whitespace)) +
+    geom_text(data = dfs, aes(x = Whitespace, y = median, label = medianLabel), size = 3, vjust = -1.5) +
+    scale_y_continuous(name = "Salary", labels = dollarFormat) +
+    xlab("Indentation preference") +
+    guides(fill = FALSE) +
+	theme_minimal()
+```
+
+The median salary for devs who prefer tabs is `r dollarFormat(tabsSalary)` vs `r dollarFormat(spaceSalary)` for those who prefer spaces. 
+A `r dollarFormat(spaceSalary - tabsSalary)` advantage to the space formatters. Weird.
+
+When I showed this plot to the guy who runs the bar where i do a bit of data hacking his immediate exclamation was...
+
+##India!
+
+Excellent question barkeep. Or more generally has it go to do with different countries? 
+
+Lets do a country breakdown.
+
+```{r, echo=FALSE}
+df %>%
+    ggplot() +
+    geom_boxplot(aes(x = Country, y = Salary, fill = Whitespace)) +
+    scale_y_continuous(name = "Salary", labels = dollarFormat) +
+    xlab("Country") +
+	coord_flip() +
+	theme_minimal()
+```
+
+Countries that represent less than .2% of the respondents have been lumped together under 'Other'. Sorry Slovak Republic you just missed the cut. 
+
+Eyeballing the data reveals the massive variation in the salaries paid by different countries. However the space preferers earning more money is pretty 
+consistent down the line. If you probe deeper into indiviudal countries you see that some of them have weird skewed salary distributions. 
+
+And yeah, one of them is India!
+
+```{r, echo=FALSE}
+gridExtra::grid.arrange(
+    df %>%
+        ggplot() +
+        geom_histogram(aes(x = Salary), bins = 20) +
+        ggtitle("All salaries"),
+	df %>%
+        filter(Country == "United States") %>%
+        ggplot() +
+        geom_histogram(aes(x = Salary), bins = 20) +
+        ggtitle("US salaries"),
+    df %>%
+        filter(Country == "India") %>%
+        ggplot() +
+        geom_histogram(aes(x = Salary), bins = 20) +
+        ggtitle("Indian salaries"),
+ncol = 3
+)
+```
+
+The US histogram shows a normal boring bell-shaped gaussian distribution but overall their is a skewed salary distribution. 
+
+The salary difference between countries proved to be a massive pain in the arse when trying to dig deeper. The salary differences just
+overwhelm any other signals you are trying to view and getting the statistical models to compensate for the lack of data in some countries 
+was a recipe for p-values of around 1.
+
+Alrighty I'm going to make a call. I think its reasonable to assume that most of the differences in the magnitude of the salaries 
+is due their local economic conditions and possible data collection variations and not due to how they indent their code. There I said it.
+
+Now we aren't particularily interested in the salaries per se but rather in their relationship with indentation preferences. So we can make the
+different countries comparable by pulling a *normalization*. You can get complicated but I just the common trick of 
+scaling each respondents salarys by the median/standard deviation of that country. With luck we havent changed the relationship between the salary 
+and the other variables, too much.
+
+Down the line this starts to have an impact on the sorts of analyses we can do because any salary signal related to a country has been wiped out. But
+at least we can start to see the forest.
+
+Lets repeat the boxplot.
+
+```{r, echo=FALSE}
+	df %>%
+        ggplot() +
+        geom_boxplot(aes(x = Country, y = Standard.Salary, fill = Whitespace)) +
+        scale_y_continuous(name = "Standard Salary", labels = dollarFormat) +
+        xlab("Country") +
+        coord_flip() +
+        theme_minimal() +
+		ggtitle("Tabs vs spaces standard salaries by country")
+
+```
+
+For good measure anyone who had a salary of more than 3 standard deviations from their countries median is considered an outlier and 
+they are now removed from the analysis.
+
+Okay now we can better see the indentation trade-off thats really persistent across countries. From now on salaries will generally be reported 
+and analysied as *standard salaries* which can be interpreted as "The respondents salary as if it were the same as  
+respondents in the United Kingdom".
+
+There is nothing particularly special about the United Kingdom other than they were "sorta in the middle" and thus most people could relate to the 
+numbers.
+
+I can tell you that for a while this plot was my curse. I tried a bunch of different models, algorithms and different analyses trying to remove various 
+influeneces. But no matter what, I would run this plot again and it was still their. Smaller maybe, but its visible persistence across a 
+wide range of different environments, cultures and respondent counts indicates that its not variance in the data. Lots of countries have crazy skewed salary 
+distributions. You can see that in the way the whiskers in the boxplot just get cut off down the bottom. But they *still* show a salary advantage for
+space indenters.
+
+##Until I cracked it!
+
+By doing this:
+
+Take the following variables as predictors.
+
++ Years of programming experience
++ Employment status
++ The programming languages you've work with.
++ The IDE's you have worked with.
++ The databases you have worked with.
++ The platforms you have worked with.
++ The frameworks you have worked with.
++ The source control system you use.
++ The methodology your team uses.
++ Code check in frequency.
++ What formal education you've undertaken.
++ What you major undergraduate subject was.
++ What formal education your parents did.
++ What your current employment status.
++ What type of company you work for.
++ What the size of your company is.
++ What type of developer you are.
++ Non-formal but still "Taught by someone else" education type.
++ Self-taught education type.
++ Gender.
++ Race.
+
+Country is specifically excluded because of the normalization we did earlier.
+
+Next, fit a model that predicts standard salaries. 
+
+For statistical nerds the model was:
+
+"Lasso regression where the lambda parameter was tuned to one standard error below the value that maximized the RMSE evaluted using 5-fold cross validation."
+
+Most of the details in that sentence can be summed up as "Throw a bucket load of algorithms and CPU cycles at trying to get the best model we can." But using Lasso 
+regression instead of straight up Linear regression makes an important difference which I'll discuss later.
+
+Next, add to the predictors "Country" and use a binomial variation of the same algorithm to fit a seperate model that is used to predict 
+the indentation preferences.
+
+For each respondent use the seperate models to create a predicted standard salary and a predicted indentation preference.
+
+How good are these predictions at predicting? The answer is not very. The salary prediction accounts for { TODO }% of the variation in salaries and
+the indentation prediction is correct { TODO }% of the time which sounds sorta okay until you realize that simply predicting "Prefer Spaces" is right { TODO }%
+of the time. And I've tried a bunch of algorithms and they all top out at pretty much the same point, with the lasso regression being a teensy bit better.
+
+However what we do have is a model that says "Well given that you've worked for this many years, in this sort of environment, with 
+these sorts of technologies we expect your salary to be so-and-so and your indentation preference to be so-and-so.
+
+So I will call these predictions the **Expected salary** and the **Expected indentation preference**.
+
+By comparing the actual values with the expected values we can get an idea of what is *not* being explained by the model. 
+These values are called the **residual**.
+
+For salaries its just:
+
+Residual Salary = Standard Salary - Expected Salary.
+
+For the indentation preference its a bit trickier because its a just a binary choice. However what you can do is create a *confusion matrix*. 
+If the actual preference and the expected preference are the same then you just say "Well thats just as expected". But if the actual preference is 
+spaces and the expected was tabs then we can say thats a preference for spaces outside the norm, how interesting. And the same for vice-versa.
+
+So what if we redo the first plot but make it residual salary vs indentation preference confusion.
+
+```{r, echo=FALSE}
+
+df <- survey_df %>% salaryVsIndentation_augment("Full")
+
+spaceResidual <- df %>% filter(Whitespace.Confusion == "Spaces") %>% .$Standard.Salary.Residual %>% median()
+spaceConfusionCount <- df %>% filter(Whitespace.Confusion == "Spaces") %>% nrow()
+tabsResidual <- df %>% filter(Whitespace.Confusion == "Tabs") %>% .$Standard.Salary.Residual %>% median()
+tabsConfusionCount <- df %>% filter(Whitespace.Confusion == "Tabs") %>% nrow()
+dfs <-
+    df %>%
+    group_by(Whitespace.Confusion) %>%
+    summarise(
+        res_mean = mean(Standard.Salary.Residual),
+		res_median = median(Standard.Salary.Residual),
+        res_mean_label = sprintf("Mean : %s", dollarFormat(res_mean)),
+        res_median_label = sprintf("Median : %s", dollarFormat(res_median))
+	)
+
+df %>%
+    ggplot(aes(x = Whitespace.Confusion, y = Standard.Salary.Residual)) +
+    geom_boxplot(aes(fill = Whitespace.Confusion)) +
+    geom_text(data = dfs, aes(x = Whitespace.Confusion, y = res_median, label = res_median_label), size = 3, vjust = -1.5) +
+    scale_y_continuous(name = "Residual Salary", labels = dollarFormat) +
+    coord_cartesian(ylim = c(-40000, 40000)) +
+    xlab("Indentation confusion") +
+    guides(fill = FALSE) +
+    theme_minimal()
+
+```
+
+Alrighty! The median residual salary for tab splitters is `r dollarFormat(tabsResidual)` vs `r dollarFormat(spaceResidual)` for those who dare to 
+prefer spaces at odds with their peers. And the difference is now a `rdollarFormat(tabsResidual - spaceResidual)` advantage to the tab formatters.
+
+So what does that accursed country break-down plot now show.
+
+```{r, echo=FALSE}
+
+df %>%
+    filter(Whitespace.Confusion != "Expected") %>%
+    ggplot() +
+    geom_boxplot(aes(x = Country, y = Standard.Salary.Residual, fill = Whitespace.Confusion)) +
+    scale_y_continuous(name = "Salary", labels = dollarFormat) +
+    xlab("Country") +
+    coord_flip(ylim = c(-40000, 40000)) +
+    theme_minimal()
+
+```
+
+Pretty much nothing. Eureka! 
+
+From this plot the salary advantage for spaces is pretty much gone. Other than it being "low", I really wouldn't put much 
+meaning into the overall residual being negative or the $236 difference. In the country plot you can just see the
+two values flipping back and forth pretty much randomly. Statistical fluff!
+
+So provided that I am skilled and haven't stuffed up somewhere, what we can say is this. Within all those variables we've added is the explanation 
+for the salary difference between tab prefers vs space prefers. Taking into account the indendation preference adds no more information about 
+how much developers earn. And the salary difference can be explained purely in terms of concrete variables like how much experience you and the 
+environments you work in. 
+
+Hey Barkeep come see this. And bring me a beer while your at it. I deserve it.
+
+##The revenge of the Sift!
+
+So what is it about the data that makes it neccessary to resort to these techniques of looking at the residuals in order to pull the data apart.
+
+You can get an idea by looking at the years of programming experience plots.
+
+```{r, echo=FALSE}
+
+stats <- df %>% salaryVsIndentation_group_summary("Years.Program")
+gridExtra::grid.arrange(
+    stats %>% continuousVsContinuousByGroup_plot("Space.Odds", "Space preference odds", "Standard.Salary", "Standard Salary", "Years.Program", "Actual space odds vs standard salary by experience"),
+    stats %>% continuousVsContinuousByGroup_plot("Space.Odds.Predicted", "Space preference odds", "Standard.Salary.Predicted", "Standard Salary", "Years.Program", "Predicted space odds vs standard salary by experience"),
+	ncol =2 
+)
+
+```
+
+Both of these plots show the odds that a dev of a given number of years will prefer spaces over tabs versus the standard salary they get. The left hand plot is taken from the
+actual figures and the right hand side is the models predictions.
+
+**Odds** are just like how chances are given when betting on the horses. An odds value of 1 is a tabs versus spaces preference of 1:1. If every person who prefers tabs their 
+will be one person who prefers spaces. An odds value of 2 is tabs versus spaces preference of 1:2. But when we use odds we can do stuff like do various bit of math on them.
+
+From the left hand graph you can see a pretty clear straight line trend of more experienced devs both prefering spaces and getting paid more. The model cleans up the wonkiness.
+This trend is pretty easy to find out and has been previously noted.
+
+However whats really interesting is if you redo the right hand plot, but *take out* the years of experience from our model. IE wipe out the knowledge of
+years experience from its predictions.
+
+```{r, echo=FALSE}
+dfl <- survey_df %>% salaryVsIndentation_augment(model = "Experience excluded", salary_predictors(discardPrefix = "Experience"), indentation_predictors(discardPrefix = "Experience"))
+statsl <- dfl %>% salaryVsIndentation_group_summary("Years.Program")
+statsl %>% continuousVsContinuousByGroup_plot("Space.Odds.Predicted", "Space preference odds", "Standard.Salary.Predicted", "Standard Salary", "Years.Program", "Expected space odds vs standard salary by experience")
+
+```
+
+Really try to get whats going on in this plot.
+
+The values that its plotting are the results of a really simply formula thats something like this:
+
+For each respondent start off with $20,000 dollars.
+If they programmed in C add $1500 dollars.
+If they programmed in VB.NET substract $500 dollars.
+If they work for a big company add $2000 dollars.
+
+And so on for around 200 variables.
+
+For the odds its pretty much the same:
+
+For each respondent start off with a log odds of .2.
+If they programmed in C add .15.
+If they programmed in VB.NET substract .2.
+
+The odds formula uses the log of the odds because they have the property that you can just add them. At the end we just take the exponent to get the odds of everything combined.
+
+To get this graph I run that prediction formula for each respondent and then just work out the means.
+
+So, I used two different fits to work out the two predictors seperately and I *specifically* removed any reference to the 
+number of years experience.
+
+But when I plot the two predictions and just split the result up by experience the relationship between experience, salary and space preference 
+its is still there. Despite my attempts to take it out the effect of the years of experience is still there. Hopelessly embedded and intertwined in with the 
+other variables.
+
+Which, **is how it actually is**. Its not like you get more money just because you sat at a desk with a dev hat on your head for 20 years. The work you did developed 
+skills and expertise that informed your choices and improved your effectiveness which earns you a higher salary.
+
+The indentaton preference is like this too but its harder to show in a neat little plot. When I tried to account for all the influences you'd account for more and more
+of the salary vs indentation difference but the value you'd account for got less and less and it got clear that it would just flatten out.
+
+The fact that indentation preference correlates so strongly to experience and experience is so hopelessly intertwined with the other variables, especially 
+the ones your interested like the technologies you've worked with, gives you an idea why no matter how closely you look, the relationship it still there. To get
+an answer you had to change the question to "Well is their something not taken into account".
+
+However the correlation is not straight up between 2 variables that you can just measure with a correlation function. Its in the relationship of multiple
+variables. The name for this is *multi-correlation* and Introduction to statistical learning mentions that it can be a real hassle.
+
+The other thing thats a problem is the number of variables involved. Above I mentioned 21 variables but their are actually far more than that. The programming
+language question is actually a semi-colon delimited list of all the programming languages you have worked with. So we can put that into a regression we
+have to split that into one variable per programming language. 31 in total. Many of the questions are the same. By the time we are done splitting everything out 
+we have around 200 variables. And we only have 10,000 records to sort those 200 variables out.
+
+This runs into a problem called the "Curse of dimensionality". Basically what happens is that because you have so many variables their are lots of radically different
+*good* looking solutions and the statistics tools stop being able to assess their quality. I'm not mentioning p-values or F-statistics for precisely that reason. We
+are way beyond them being meaningful.
+
+The Lasso algorithm I am using helps with these problems. Its like normal linear regression but acts like a blanket that *smothers* the formula coefficients towards
+zero. This is called **Regularization**. And it has a feature that automatically "drops out" any variables that are noise. The *weight* of the blanket is set by a parameter
+called lambda and its been tuned to the point where its as heavy as possible while still giving the most accurate predictions we can expect to get. At this point the model ends
+up using ~70 of those 200 variables.
+
+What I was hoping was that it just drop out entire questions. So I could just say "Parents education is not important". But what it did was drop out those sub-questions.
+If two variables are highly correlated then once you've added one, the other one is now just noise. So the lasso algorithm tends to automatically break up the multi-collinarity.
+However the advice given is that you really can't get much information out of which of those variables gets dropped out. The solution you get is one of many that would work
+well.
+
+##Getting some goddamn answers!
+
+So given all these problems is their a way we can get a more concrete idea of whats going on?
+
+Well here is a technique I came up with based on advice from R for data science. http://r4ds.had.co.nz/ 
+
+Lets start with that experience variable which does have a powerful effect on the data. If you plot the predictions of the full model and also plot model with the experience variable removed can see that the predictions different. 
+
+```{r, echo=FALSE}
+dfc <- bind_rows(df, dfl)
+statsc <- dfc %>% salaryVsIndentation_group_summary("Years.Program")
+ggplot(statsc, aes(x = Space.Odds.Predicted, y = Standard.Salary.Predicted, color = Model, size = Count)) +
+        geom_smooth(method = "lm", se = FALSE, show.legend = FALSE) +
+        geom_count() +
+        ggrepel::geom_text_repel(aes(label = Years.Program), size = 3.5) +
+        scale_size_area(name = "Respondents") +
+        ggtitle("Predicted salary vs space odds model comparison")
+```
+
+You can see how the value ranges and slope are different. Adding the experience variable is clearly adding information to the model
+
+Because we have switched to odds we can now determine the odds residuals. Lets see what happens if we plot the residuals of the 
+2 models together.
+
+```{r, echo=FALSE}
+ggplot(statsc, aes(x = Space.Odds.Residual, y = Standard.Salary.Residual, color = Model, size = Count)) +
+        geom_smooth(method = "lm", se = FALSE, show.legend = FALSE) +
+        geom_count() +
+        ggrepel::geom_text_repel(aes(label = Years.Program), size = 3.5) +
+        scale_size_area(name = "Respondents") +
+        ggtitle("Salary vs Space odds RCP - By experience ")
+
+```
+
+Okay now we are getting somewhere. By plotting how the models are getting it wrong we are really focussing on what
+information that particular variable is adding. On the full model plot the trend line is pretty meaningless but the experience
+excluded model plot shows the trend that gets added to our model when we include it.
+
+Also its hard to put an interpretation on what the model vs model predictions are showing. But the model vs model residual plots show
+how the accuracy of the model is improved by adding that variable to it. It shows whether a variable is adding information not contained within all the other
+variables and gives us an idea of the importance of that variable by how much it improves the predictions. The more the points *shrink* into the middle, the more
+powerful that variable is.
+
+I'm calling this plot a **Residual comparison plot**. RCP for short.
+
+One way to check to how they are working is by comparing it with a variable has little importance. One is the parents highest education level.
+
+```{r, echo=FALSE}
+
+dfl <- survey_df %>% salaryVsIndentation_augment(model = "Parents education excluded", salary_predictors(discardPrefix = "Highest.Education.Parents"), indentation_predictors(discardPrefix = "Highest.Education.Parents"))
+dfc <- bind_rows(df, dfl)
+statsc <- dfc %>% salaryVsIndentation_group_summary("Highest.Education.Parents") %>% filter(Count > 100)
+
+ggplot(statsc, aes(x = Space.Odds.Residual, y = Standard.Salary.Residual, color = Model, size = Count)) +
+        geom_count() +
+        ggrepel::geom_text_repel(aes(label = Highest.Education.Parents), size = 3.5) +
+        scale_size_area(name = "Respondents") +
+        ggtitle("Salary vs Space odds RCP - By parents education level")
+
+```
+
+You can see a bit of shuffling around but nothing much really. Telling the models specifically about the parents highest education didn't do much to improve their ability to predict the salary/indentation preferences of
+developers. Their may be a little bit of shrinkage but "For reasons" there always will be. Also the ranges of the values are lowish. 
+
+Note that the parents highest education does correlate with things in our model. The developers own highest education level as I recall. And while that variable might have had a major influence on
+developers lives, in terms by time we get to this analysis its effects are completely swamped and mixed in with everything else.
+
+You can get an idea of this by doing an RCP plot against a completely random variable added to the data.
+
+```{r, echo=FALSE}
+
+dfr <- survey_df
+randomLevels <- c("Frabble", "Plorge", "Ding-zat", "Muzak", "Tridine")
+dfr$Random <- as.factor(randomLevels[sample(length(randomLevels), nrow(dfr), replace = TRUE)])
+dfri <- dfr %>% salaryVsIndentation_augment(model = "Include random variable", c("Random", salary_predictors()), c("Random", indentation_predictors()))
+dfrx <- dfr %>% salaryVsIndentation_augment(model = "Exclude random variable", c(salary_predictors()), c(indentation_predictors()))
+dfc <- bind_rows(dfri, dfrx)
+statsc <- dfc %>% salaryVsIndentation_group_summary("Random")
+
+ggplot(statsc, aes(x = Space.Odds.Residual, y = Standard.Salary.Residual, color = Model, size = Count)) +
+        geom_count() +
+        ggrepel::geom_text_repel(aes(label = Random), size = 3.5) +
+        scale_size_area(name = "Respondents") +
+        ggtitle("Salary vs Space odds RCP - By random variable")
+```
+
+The ranges for the random variables are $400 for the salary and .1 for the odds which gives you an idea of the maximum fidelity we can achieve. And the points don't move at all. 
+The lasso algorithm realized they were pure noise and dropped them from the model completely. It also shows what "No correlation with anything" looks like.
+
+Okay. Its been a long ride, but now that we have a tool its damn, damn, DAMN high time that we get some answers!
+
+```{r, echo=FALSE}
+
+# df <- survey_df %>% salaryVsIndentation_augment("Full")
+dflanguage <- survey_df %>% salaryVsIndentation_augment(model = "Language", salary_predictors(discardPrefix = "Language_"), indentation_predictors(discardPrefix = "Language_"))
+dfide <- survey_df %>% salaryVsIndentation_augment(model = "IDE", salary_predictors(discardPrefix = "IDE_"), indentation_predictors(discardPrefix = "IDE_"))
+dfversion <- survey_df %>% salaryVsIndentation_augment(model = "Version", salary_predictors(discardPrefix = "Version_"), indentation_predictors(discardPrefix = "Version_"))
+df_company_size <- survey_df %>% salaryVsIndentation_augment(model = "CompanySize", salary_predictors(discardPrefix = "CompanySize_"), indentation_predictors(discardPrefix = "CompanySize_"))
+dfc <- bind_rows(dflanguage, dfide, dfversion, df_company_size, df_company_size)
+statsc <- dfc %>% salaryVsIndentation_tags_summary() %>% filter(Category %in% c("Language", "IDE", "Platform", "Framework", "Version", "CompanySize"), Count > 500, Name != "Emacs")
+
+ggplot(statsc, aes(x = Space.Odds.Residual, y = Standard.Salary.Residual, color = Model, size = Count)) +
+        geom_count() +
+        scale_size_area(name = "Respondents")
+
+
+statsc %>%
+    ggplot(data = statsc, aes(x = NMDS1, y = NMDS2, fill = shannon, z = shannon)) +
+  geom_tile(data = language_sg) +
+  stat_contour()
+
+
+
+statsGrid <- function(df, category) {
+    df <- df %>% filter(Category == category, Count > 200)
+	statsg <- akima::interp(x = df$Space.Scaled, y = df$Salary.Scaled, z = df$Count)
+	result <- reshape2::melt(statsg$z, na.rm = TRUE)
+    names(result) <- c("x", "y", "Count")
+    result$Space.Scaled <- statsg$x[result$x]
+    result$Salary.Scaled <- statsg$y[result$y]
+    result$Category <- category
+    result
+}
+
+language_sg <- statsc %>% statsGrid("Language")
+ide_sg <- statsc %>% statsGrid("IDE")
+version_sg <- statsc %>% statsGrid("Version")
+sg <- bind_rows(language_sg, ide_sg, version_sg)
+
+ggplot() +
+    geom_tile(data = language_sg, aes(x = Space.Scaled, y = Salary.Scaled, fill = Category, alpha = sqrt(Count))) +
+    geom_tile(data = ide_sg, aes(x = Space.Scaled, y = Salary.Scaled, fill = Category, alpha = sqrt(Count))) +
+    geom_tile(data = version_sg, aes(x = Space.Scaled, y = Salary.Scaled, fill = Category, alpha = sqrt(Count)))
+
+
+ggplot(data = d2, aes(x = NMDS1, y = NMDS2, fill = shannon, z = shannon)) +
+  geom_tile(data = language_sg) +
+  stat_contour()
+
+#	stat_density_2d(aes(fill = ..level.., color = Model), geom = "polygon", alpha = 0.5) +
+
+#            scale_size_area(max_size = 10, name = "Respondents")
+# geom_count(aes(size = Count), alpha = 0.5) +
+
+
+```
+
+##Is coding ... about coding?
+
+Or more specifically, does the programming language matter?
+
+```{r ProgrammingLanguage, echo=FALSE}
+
+dfl <- survey_df %>% salaryVsIndentation_augment(model = "Programming language excluded", salary_predictors(discardPrefix = "Language_"), indentation_predictors(discardPrefix = "Language_"))
+dfc <- bind_rows(df, dfl)
+statsc <- dfc %>% salaryVsIndentation_tags_summary()
+statsc %>%
+	filter(Category == "Language") %>%
+	ggplot(aes(x = Space.Odds.Residual, y = Standard.Salary.Residual, color = Model, size = Count)) +
+			geom_count() +
+			ggrepel::geom_text_repel(aes(label = Name), size = 3.5) +
+			scale_size_area(name = "Respondents") +
+			ggtitle("Salary vs Space odds RCP - Programming languages used")
+
+```
+
+Ya a bit. Remove low responent counts to focus on bit ticket items.
+
+```{r, echo=FALSE}
+statsc %>%
+    filter(Category == "Language" & Count > 500) %>%
+    ggplot(aes(x = Space.Odds.Residual, y = Standard.Salary.Residual, color = Model, size = Count)) +
+            geom_count() +
+            ggrepel::geom_text_repel(aes(label = Name), size = 3.5) +
+			coord_cartesian(xlim = c(0.5, 1.5), ylim = c(-5000, 5000)) +
+			scale_size_area(name = "Respondents") +
+			ggtitle("Salary vs Space odds RCP - Programming languages used")
+```
+
+Salary range. 5000, Odds range .7
+
+##What about the tools?
+
+Is it about the IDEs?
+
+```{r, echo=FALSE}
+
+dfl <- survey_df %>% salaryVsIndentation_augment(model = "IDE excluded", salary_predictors(discardPrefix = "IDE_"), indentation_predictors(discardPrefix = "IDE_"))
+dfc <- bind_rows(df, dfl)
+statsc <- dfc %>% salaryVsIndentation_tags_summary()
+statsc %>%
+	filter(Category == "IDE") %>%
+	ggplot(aes(x = Space.Odds.Residual, y = Standard.Salary.Residual, color = Model, size = Count)) +
+			geom_count() +
+			ggrepel::geom_text_repel(aes(label = Name), size = 3.5) +
+			scale_size_area(name = "Respondents") +
+			ggtitle("Salary vs Space odds RCP - IDE used")
+
+```
+
+Whoh! Remove low respondent counts and emacs.
+
+```{r, echo=FALSE}
+
+statsc %>%
+    filter(Category == "IDE" & Count > 500 & Name != "Emacs") %>%
+    ggplot(aes(x = Space.Odds.Residual, y = Standard.Salary.Residual, color = Model, size = Count)) +
+            geom_count() +
+            ggrepel::geom_text_repel(aes(label = Name), size = 3.5) +
+            coord_cartesian(xlim = c(0.5, 1.5), ylim = c(-5000, 5000)) +
+			scale_size_area(name = "Respondents") +
+			ggtitle("Salary vs Space odds RCP - IDE used")
+
+```
+
+Can see shrinkage is toward the middle. Shows an important change in the response of residual.
+Salary range 3000, odds range 0.6.
+
+
+##Platform
+
+```{r, echo=FALSE}
+
+dfl <- survey_df %>% salaryVsIndentation_augment(model = "Platform excluded", salary_predictors(discardPrefix = "Platform_"), indentation_predictors(discardPrefix = "Platform_"))
+dfc <- bind_rows(df, dfl)
+statsc <- dfc %>% salaryVsIndentation_tags_summary()
+statsc %>%
+	filter(Category == "Platform") %>%
+	ggplot(aes(x = Space.Odds.Residual, y = Standard.Salary.Residual, color = Model, size = Count)) +
+			geom_count() +
+			ggrepel::geom_text_repel(aes(label = Name), size = 3.5) +
+			scale_size_area(name = "Respondents") +
+			ggtitle("Salary vs Space odds RCP - Platform used")
+
+```
+
+Salary shrinkage.
+
+```{r, echo=FALSE}
+
+statsc %>%
+	filter(Category == "Platform" & Count > 500) %>%
+	ggplot(aes(x = Space.Odds.Residual, y = Standard.Salary.Residual, color = Model, size = Count)) +
+			geom_count() +
+			ggrepel::geom_text_repel(aes(label = Name), size = 3.5) +
+			scale_size_area(name = "Respondents") +
+			ggtitle("Salary vs Space odds RCP - Platform used")
+
+```
+
+Little shrinkage. Especially Salary range $3000, odds range .4.
+
+##Version Control
+
+```{r, echo=FALSE}
+
+dfl <- survey_df %>% salaryVsIndentation_augment(model = "Version control excluded", salary_predictors(discardPrefix = "Version_"), indentation_predictors(discardPrefix = "Version_"))
+dfc <- bind_rows(df, dfl)
+statsc <- dfc %>% salaryVsIndentation_tags_summary()
+statsc %>%
+	filter(Category == "Version") %>%
+	ggplot(aes(x = Space.Odds.Residual, y = Standard.Salary.Residual, color = Model, size = Count)) +
+			geom_count() +
+			ggrepel::geom_text_repel(aes(label = Name), size = 3.5) +
+			scale_size_area(name = "Respondents") +
+			ggtitle("Salary vs Space odds RCP - Version control used")
+
+```
+
+A bit deceiving. Most version control systems have few respondents.
+
+
+```{r, echo=FALSE}
+
+statsc %>%
+	filter(Category == "Version" & Count > 500) %>%
+	ggplot(aes(x = Space.Odds.Residual, y = Standard.Salary.Residual, color = Model, size = Count)) +
+			geom_count() +
+			ggrepel::geom_text_repel(aes(label = Name), size = 3.5) +
+			scale_size_area(name = "Respondents") +
+			ggtitle("Salary vs Space odds RCP - Popular Version worked with")
+
+```
+
+Very little information. Git has won! Salary range $2000 and odds range .2.
+
+##Database 
+
+```{r, echo=FALSE}
+
+dfl <- survey_df %>% salaryVsIndentation_augment(model = "Database excluded", salary_predictors(discardPrefix = "DB_"), indentation_predictors(discardPrefix = "DB_"))
+dfc <- bind_rows(df, dfl)
+statsc <- dfc %>% salaryVsIndentation_tags_summary()
+statsc %>%
+	filter(Category == "DB") %>%
+	ggplot(aes(x = Space.Odds.Residual, y = Standard.Salary.Residual, color = Model, size = Count)) +
+			geom_count() +
+			ggrepel::geom_text_repel(aes(label = Name), size = 3.5) +
+			scale_size_area(name = "Respondents") +
+			ggtitle("Salary vs Space odds RCP - Database worked with")
+
+```
+
+A bit deceiving. Most version control systems have few respondents.
+
+
+```{r, echo=FALSE}
+
+statsc %>%
+    filter(Category == "DB" & Count > 500) %>%
+    ggplot(aes(x = Space.Odds.Residual, y = Standard.Salary.Residual, color = Model, size = Count)) +
+            geom_count() +
+            ggrepel::geom_text_repel(aes(label = Name), size = 3.5) +
+            scale_size_area(name = "Respondents") +
+            ggtitle("Salary vs Space odds RCP - Popular database worked with")
+
+```
+
+Salary range $2500 and odds range .2. Indentation preference close to statistical fidelity.
+
+##Methodology
+
+```{r, echo=FALSE}
+
+dfl <- survey_df %>% salaryVsIndentation_augment(model = "Database excluded", salary_predictors(discardPrefix = "Methodology_"), indentation_predictors(discardPrefix = "Methodology_"))
+dfc <- bind_rows(df, dfl)
+statsc <- dfc %>% salaryVsIndentation_tags_summary()
+statsc %>%
+	filter(Category == "Methodology") %>%
+	ggplot(aes(x = Space.Odds.Residual, y = Standard.Salary.Residual, color = Model, size = Count)) +
+			geom_count() +
+			ggrepel::geom_text_repel(aes(label = Name), size = 3.5) +
+			scale_size_area(name = "Respondents") +
+			ggtitle("Salary vs Space odds RCP - Methodology in use")
+
+```
+
+```{r, echo=FALSE}
+
+statsc %>%
+    filter(Category == "Methodology" & Count > 500) %>%
+    ggplot(aes(x = Space.Odds.Residual, y = Standard.Salary.Residual, color = Model, size = Count)) +
+            geom_count() +
+            ggrepel::geom_text_repel(aes(label = Name), size = 3.5) +
+			coord_cartesian(xlim = c(0.5, 1.5), ylim = c(-5000, 5000)) +
+			scale_size_area(name = "Respondents") +
+			ggtitle("Salary vs Space odds RCP - Methodology in use")
+
+```
+
+Impacts salary, very little impact on odds preference but quite an impact on salary.
+
+##Company size
+
+```{r, echo=FALSE}
+
+dfl <- survey_df %>% salaryVsIndentation_augment(model = "Company size excluded", salary_predictors(discardPrefix = "CompanySize_"), indentation_predictors(discardPrefix = "CompanySize_"))
+dfc <- bind_rows(df, dfl)
+statsc <- dfc %>% salaryVsIndentation_tags_summary()
+statsc %>%
+	filter(Category == "CompanySize") %>%
+	ggplot(aes(x = Space.Odds.Residual, y = Standard.Salary.Residual, color = Model, size = Count)) +
+			geom_count() +
+			ggrepel::geom_text_repel(aes(label = Name), size = 3.5) +
+			scale_size_area(name = "Respondents") +
+			ggtitle("Salary vs Space odds RCP - Company size")
+
+```
+
+```{r, echo=FALSE}
+
+statsc %>%
+    filter(Category == "CompanySize" & Count > 200) %>%
+    ggplot(aes(x = Space.Odds.Residual, y = Standard.Salary.Residual, color = Model, size = Count)) +
+            geom_count() +
+            ggrepel::geom_text_repel(aes(label = Name), size = 3.5) +
+            coord_cartesian(xlim = c(0.75, 1.5), ylim = c(-5000, 5000)) +
+            scale_size_area(name = "Respondents") +
+            ggtitle("Salary vs Space odds RCP - Methodology in use")
+
+```
+
+Salary range $2500 and odds range .2. Indentation preference close to statistical fidelity.

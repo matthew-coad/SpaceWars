@@ -1,0 +1,211 @@
+---
+title: "Space Wars - Part 2 - Revenge of the sift!"
+output: html_document
+---
+
+```{r, echo=FALSE, include=FALSE}
+source("~/MCD/projects/SpaceWars/Scripts/survey_load.R")
+source("~/MCD/projects/SpaceWars/Scripts/survey_plots.R")
+
+dollarFormat <- scales::dollar_format(largest_with_cents = 0)
+```
+
+
+##Thats awesome! But I can see a bit of a downside.
+
+What is a bit puzzling is that the numbers are all negative. That median salaries of respondents is **less** than the models predictions for all 3 categories.
+You expect that they would "Even out".
+
+However thats those lop-sided salary distributions that have come back to bite us. You can see it by plotting the standard salary distribution vs the expected
+salary distribution.
+
+```{r, echo=FALSE}
+
+standardMedian <- median(df$Standard.Salary)
+expectedMedian <- median(df$Standard.Salary.Predicted)
+df %>%
+    ggplot() +
+    geom_density(aes(x = Standard.Salary, color = "Actual")) +
+    geom_vline(xintercept = standardMedian, color = "red") +
+    geom_density(aes(x = Standard.Salary.Predicted, color = "Expected")) +
+    geom_vline(xintercept = expectedMedian, color = "cyan") +
+	scale_x_continuous(name = "Standard Salary", labels = dollarFormat)
+
+```
+
+I've highlighted the medians with a vertical line. From this plot you can see that the model is capturing some of the details of the survey. 
+Their is this little bump at top right of the peak. But being able to compare the salary distribution with the models normal one
+really highlights the skew. And the model doesn't capture the "breadth" of the actual salaries. 
+
+**TODO** Stuff about the monthly salaries.
+
+Our model captures "part" of the story but it contains distortions, and its predictions will have a "bit of a skew". However But by using the trick of comparing the model to the actuals
+we can start to try to "prise apart" the influences on the salary/indentation correlation.
+
+Seriously.
+
+
+
+```{r, echo=FALSE}
+
+dfc.levels <- c("Tabs", "Spaces", "Pred.Tabs", "Pred.Spaces")
+dfcs <- df %>% transmute(Country = Country, Standard.Salary = Standard.Salary, Whitespace = factor(Whitespace, levels = dfc.levels))
+dfcp <- df %>% transmute(Country = Country, Standard.Salary = Standard.Salary.Predicted, Whitespace = factor(if_else(Whitespace == "Tabs", "Pred.Tabs", "Pred.Spaces"), levels = dfc.levels))
+dfc <- bind_rows(dfcs, dfcp)
+
+reportCountries <- df %>% group_by(Country) %>% summarise(count = n()) %>% arrange(desc(count)) %>% filter(count < 200 & count > 100) %>% .$Country
+ 
+dfc %>%
+    filter(Country %in% reportCountries) %>%
+    ggplot() +
+    geom_boxplot(aes(x = Country, y = Standard.Salary, fill = Whitespace)) +
+    scale_y_continuous(name = "Salary", labels = dollarFormat) +
+    xlab("Country") +
+    coord_flip(ylim = c(20000, 80000)) +
+    theme_minimal()
+
+```
+
+
+##
+
+
+
+
+
+
+
+In part 1 of this series I reported how I was able to combine 2 tools to examine apart the Salary/Indentation preference correlation. 
+Lasso regression and the trick of using residuals between the models predictions and the actual data to find out whats *missing* from the model. 
+
+Whats the quote. "Once you have accounted for everything, whatever remains, no matter how unlikely, must be the truth."
+
+In part 2 I'll go over how we can that and the limitations.
+
+But first I'd like to discuss...
+
+##A pox on the data model!
+
+So what is it that makes this problem so tricky? In his original analysis **TODO* reported using one linear regression model. I've reported using
+2 models and I'm going to use a lot more. But actually each of those models I'm reported was determined by examining the results of *500* seperate models 
+to tune and validate it. 
+
+The result of tens of thousands of models by the time we are done. As I mentioned earlier a lot of CPU cycles. 
+And a lot of PHDs working out how to make it all work.
+
+The first problem is called **The curse of dimensionality**.
+
+The curse of dimensionality is referring to a problem the statistical methods have when you have lots of input variables. Basically what happens
+is that lots of radically different solutions start to look good and the traditional statistical methods used to evaluate the "quality" of the
+model stop working. 
+
+The trivial example that highlights this issue is using one variable to predict another and you have 2 data points. You can draw a line straight 
+through both data points and it has a RMSE of zero! In this case its pretty obvious that its not a good idea to put much meaning on just 2 data points
+but its not so obvious when you have lots data points and lots of variables.
+
+The curse is that we've got lots of information but if we try to use all that information together it starts to limit the sorts of inferences we can 
+make using it.
+
+So for a given number of data points how many variables is too many? 
+
+The advice given in Introduction to Statistical Learning is:
+
+p > n vs p >> n
+
+So "More data points than the number of variables" vs "A lot more data points than the number of variables". 
+
+Thanks guys. But when you study this stuff you get lots of this sort of advice. Everything is "It depends".
+
+###So how many variables do we have?
+
+```{r, echo=FALSE}
+
+df <- survey_assemble()
+spaceSalary <- df %>% filter(Whitespace == "Spaces") %>% .$Salary %>% median()
+spaceCount <- df %>% filter(Whitespace == "Spaces") %>% nrow()
+tabsSalary <- df %>% filter(Whitespace == "Tabs") %>% .$Salary %>% median()
+tabsCount <- df %>% filter(Whitespace == "Tabs") %>% nrow()
+allRecordCount <- nrow(survey.data)
+
+```
+
+Well in part 1 I mentioned a list of 21 input variables and that we had `r nrow(survey.data)` data records to work with. Doesn't seem
+so bad.
+
+However the question "The programming languages you've worked with" is actually a semi-colon delimited list of all the 
+programming languages that the dev has worked with. So to make it something we can feed into a linear regression model we
+have to split that into a series of questions. Have you worked with C? Have you worked with Java? 
+
+Their are `r length(languageExperience)` programming languages, so thats `r length(languageExperience)` variables.
+
+Lots of the useful questions are the same. How many different IDEs used? `r length(ideExperience)`. How many databases? `r length(databaseExperience)`.
+
+And its even worse than that. Most of the questions are categorical. For the question "Formal Education" their are a series of answers like "High School", 
+"Bachelor degree", "Masters degree". Its not meaningful to put a numerical value on having completed a bachelors degree vs having completed a masters degree.
+So even if we don't explicitly code them, the underlying tools treat the categorical variables in a similar fashion to the way I treated "bit-list of choices" variables. 
+Each choice becomes a seperate variable thats zero if that choice isn't selected and one if it is.
+
+So how many variables in total?
+
+```{r, echo=FALSE}
+
+standardSalaryFormula <- variables_formula("Standard.Salary", salary_predictors())
+standardSalaryFit <- lm(standardSalaryFormula, df)
+standardSalaryTerms <- broom::tidy(standardSalaryFit)
+standardSalaryVariableCount <- nrow(standardSalaryTerms) - 1
+
+preferSpaceFormula <- variables_formula("Prefer.Space", indentation_predictors())
+preferSpaceFit <- lm(preferSpaceFormula, df)
+preferSpaceTerms <- broom::tidy(preferSpaceFit)
+preferSpaceVariableCount <- nrow(preferSpaceTerms) - 1
+
+```
+
+Its `r standardSalaryVariableCount` for salary predictions and `r preferSpaceVariableCount` of indentation predictions.
+
+###Is that too many? 
+
+Oh yeah.
+
+A mistake I made at one stage really highlights it. In part 1 I mentioned that you have to exclude country from the model that predicts standard salary
+because we normalized all the countries. I specially *erased* the salary differences between countries so that is no longer a variable.
+
+So if you do try to fit a linear model that predicts standard salary that includes country, in a nice world where their wasn't a pox on my data model, 
+the country coefficients should come out to about the same.
+
+```{r, echo=FALSE}
+
+sampleCountries <- c("United States", "United Kingdom", "Australia", "Poland", "Germany")
+sampleDf <- df %>% filter(Country %in% sampleCountries)
+
+predictors <- c(salary_predictors(), names(countries))
+lm.fit <- lm(variables_formula("Standard.Salary", predictors), sampleDf)
+dmatrix <- glmnet_dmatrix(sampleDf, "Standard.Salary", predictors)
+glm.cvfit <- glmnet::cv.glmnet(dmatrix$x, dmatrix$y, alpha = 1)
+tidy(coef(glm.fit, s = "lambda.1se"))
+glm.fit <- glmnet::glmnet(dmatrix$x, dmatrix$y, alpha = 1, lambda = glm.fit$lambda.1se)
+
+glm.fit$
+countrySalaryFullTerms <- broom::tidy(predict(glm.fit, newx = dmatrix$x, s = glm.fit$lambda.1se, type= "link"))
+
+salaries <- df$Standard.Salary
+salaryPredictions <- 
+salaryPredictions <- c(salaryPredictions)
+salaryResiduals <- salaries - salaryPredictions
+
+
+experienceCountrySalaryFit <- lm(variables_formula("Standard.Salary", c("Experience", "Country")), sampleDf)
+experienceCountryStandardTerms <- broom::tidy(companyCountrySalaryFit)
+
+
+However that isn't the case.
+
+
+
+
+You may notice that I'm not mentioning p-values or F-statistics.
+
+
+In part 1 is a list of all the input variables I included in my model. Its 21.
+
+

@@ -1,0 +1,583 @@
+---
+title: "The spaces road to riches"
+author: "Matthew Coad"
+date: "2 July 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+library(tidyverse)
+library(forcats)
+library(stringr)
+
+source("survey.configuration.R")
+
+```  
+
+```{r load, include=FALSE}
+
+## Load source data
+
+col_types <- cols(
+  .default = col_character(),
+  Respondent = col_integer(),
+  CareerSatisfaction = col_integer(),
+  JobSatisfaction = col_integer(),
+  HoursPerWeek = col_integer(),
+  StackOverflowSatisfaction = col_integer(),
+  Salary = col_double(),
+  ExpectedSalary = col_double()
+)
+
+survey.data <- read_csv("survey.csv", col_types = col_types) 
+
+```
+
+*Why do programmers who format their code using spaces earn more money than those using spaces?*
+
+###The nature of the beast!
+```{r}
+
+## survey.source is a bit of a beast. 140 columns. Also it has tons of missing data.
+## To make it manageable we'll build up survey.report from survey.data containing just what we need
+
+whitespace.levels <- c("Tabs", "Spaces")
+
+# But first off, only work with rows that have a salary and a white space preference.
+
+survey.source <- survey.data %>% filter(!is.na(Salary) & !is.na(TabsSpaces) & TabsSpaces%in% whitespace.levels)
+
+whitespace.source <- survey.source %>% select(salary = Salary)
+whitespace.source$whitespace <- survey.source$TabsSpaces %>% fct_drop()
+whitespace.source$preferSpaces <- survey.source$TabsSpaces == "Spaces"
+whitespace.source$preferTabs <- survey.source$TabsSpaces == "Tabs"
+
+whitespace.report <- whitespace.source
+whitespace.outliers <- rep(FALSE, nrow(whitespace.report))
+
+tabSalary <- whitespace.report %>% filter(preferTabs) %>% .$salary %>% median() %>% round()
+spaceSalary <- whitespace.report %>% filter(preferSpaces) %>% .$salary %>% median() %>% round()
+spaceAdvantage <- spaceSalary - tabSalary
+
+```
+
+On the basis of the 2017 Stack overload survey programmers who prefer to format their code using spaces earn a higher salary than programmers who prefer tabs.
+
+The median salary for programmers that prefer spaces is `r dollar(spaceSalary)` vs `r dollar(tabSalary)` for those who prefer tabs. A `r dollar(spaceAdvantage)` salary advantage to spaces.
+
+It seems unlikely that such a minor stylistic difference should result in such a major disparity in salaries earnt by software developers.
+
+The interesting data science question is "Whats going on".
+
+##A cultural divide?
+
+The Stack overflow survey is international and thus their is a wide disparity in the median salaries earnt in different countries. A possible underlying cause of the spaces vs tabs salary difference is some sort of cultural/regional preference. If a space preference was a regional preference then perhaps regional salary disparity can solve the mystery.
+
+```{r}
+
+## Include countries.
+
+country.source <- whitespace.report
+country.source$country <- survey.source$Country %>% fct_explicit_na() %>% fct_lump(prop = 0.002)
+
+#Generate stats for a given data grouping
+stats <- function(data, groupVariable) {
+  data %>% 
+    group_by_(groupVariable) %>% 
+    summarise(
+      count = n(), 
+      median_salary = median(salary), 
+      sd_salary = sd(salary),
+      preferSpaces = sum(preferSpaces) / n()
+    ) %>% 
+    mutate(rank = desc(min_rank(count))) %>%
+    mutate(rank = rank - min(rank) + 1) %>%
+    arrange(desc(count))
+}
+
+statsReport <- function(groupVariable, stats) {
+  stats %>% 
+    mutate(`median Salary` = dollar(median_salary), `space pref.` = percent(preferSpaces)) %>%
+    select_(groupVariable, "count", "`median Salary`", "`space pref.`")
+}
+
+country.stats <- stats(country.source, "country")
+top10Countries <- country.stats %>% filter(rank <= 10) %>% .$country
+
+knitr::kable(statsReport("country", country.stats), caption = "Country space preference")
+
+```
+
+This table lists the number of respondents, median salary, and their spaces over tabs preference. It shows a marked range of median salaries and space preferences.
+
+```{r}
+
+salaryVsSpacesPlot <- function(data, groupVariable, stats = NULL) {
+  if (is.null(stats))
+    stats <- stats(data, groupVariable)
+  ggplot(stats, aes(x = preferSpaces, y = median_salary, size = count)) +
+    geom_smooth(method = "lm", se = FALSE, show.legend = FALSE) +
+    geom_count() +
+    ggrepel::geom_text_repel(aes_string(label = groupVariable), size = 3.5) +
+    scale_size_area(name = "Respondents") +
+    ylab("Median salary") +
+    xlab("Spaces preference") +
+    theme_minimal()
+}
+
+
+#    ggplot2::geom_vline(xintercept = spacePrefMean, linetype = "dotted") +
+
+salaryVsSpacesPlot(country.source, "country")
+
+
+```
+
+Plot spaces preference vs median salary. Distinct space preference for higher earning countries.
+
+```{r}
+salaryVsGroupBoxPlot <- function(data, groupVariable) {
+  ggplot(data, aes_string(x=groupVariable, y = "salary", fill = "whitespace")) +
+      geom_boxplot() +
+      scale_fill_discrete(name="Preference", breaks = c("Tabs", "Spaces")) +
+      coord_flip() +
+      theme_minimal() +
+      xlab(groupVariable) +
+      ylab("Salary")
+}
+
+salaryVsGroupBoxPlot(country.source[country.source$country %in% top10Countries,], "country")
+
+```
+
+Still a space preference. Dig deeper.
+
+
+```{r}
+#Salary histogram by group
+salaryHistogram <- function(data, groupVariable, group, salaryVariable = "salary", limits = NULL) {
+  p <- 
+    ggplot(data[data[[groupVariable]] == group,], aes_string(x = salaryVariable)) + 
+    geom_histogram(bins = 20) + ylab(paste0(group, " count"))
+  if (!is.null(limits)) {
+    p <- p + coord_cartesian(xlim = limits) 
+  }
+  p
+}
+
+unitedStates <- "United States"
+germany <- "Germany"
+unitedKingdom <- "United Kingdom"
+india <- "India"
+russianFederation <- "Russian Federation"
+canada <- "Canada"
+israel <- "Israel"
+australia <- "Australia"
+other <- "Other"
+
+sampleCountries <- c(unitedStates, germany, unitedKingdom, india, russianFederation, canada, israel, australia, other)
+
+#9 plots in a 3-by-3 grid
+plot9 <- function(plots) {
+  do.call(gridExtra::grid.arrange, plots)
+}
+
+sampleCountries %>% map(salaryHistogram, data = country.source, groupVariable = "country") %>% plot9()
+
+
+```
+
+Salary distribution is ... normalish.... I think we can normalize salary by country.
+
+```{r}
+
+normalCountry <- unitedKingdom
+normalizeSalary <- function(data, groupVariable, normalGroup = NULL, outlierDevations = NULL) {
+
+  groupStats <- stats(data, groupVariable)
+  statedReport <- data %>% inner_join(groupStats, by = groupVariable)
+
+  normalStat <- groupStats[groupStats[[groupVariable]] == normalGroup,]
+  normalMedian <- normalStat$median_salary
+  normalSD <- normalStat$sd_salary
+
+  normalizedSalary <- (statedReport$salary - statedReport$median_salary) / statedReport$sd_salary
+  normalizedSalary <- normalizedSalary * normalSD + normalMedian
+  normalizedSalary
+}
+
+country.source$countrySalary <- normalizeSalary(country.source, "country", normalCountry)
+
+sampleCountries %>% map(salaryHistogram, data = country.source, groupVariable = "country", salaryVariable = "countrySalary") %>% plot9()
+
+
+```
+
+The low paying countries go really weird. Lets strip outliers at 3 standard deviations.
+
+```{r}
+
+outliers <- function(data, variable, deviations) {
+  midValue <- median(data[[variable]])
+  sdValue <- sd(data[[variable]])
+  minValue <- midValue - (deviations * sdValue)
+  maxValue <- midValue + (deviations * sdValue)
+  data[[variable]] < minValue | data[[variable]] > maxValue
+}
+
+sampleCountries %>% map(salaryHistogram, data = country.source[!outliers(country.source, "countrySalary", 3),], groupVariable = "country", salaryVariable = "countrySalary") %>% plot9()
+
+```
+
+  
+  
+```{r}
+
+country.outliers <- outliers(country.source, "countrySalary", 3)
+country.report <- country.source[!country.outliers,]
+country.report$originalSalary <- country.report$salary
+country.report$salary <- country.report$countrySalary
+
+countryTabSalary <- country.report %>% filter(preferTabs) %>% .$salary %>% median() %>% round()
+countrySpaceSalary <- country.report %>% filter(preferSpaces) %>% .$salary %>% median() %>% round()
+countrySpaceAdvantage <- countrySpaceSalary - countryTabSalary
+
+
+```
+The median country salary for programmers that prefer spaces is `r dollar(countrySpaceSalary)` vs `r dollar(countryTabSalary)` for those who prefer tabs. A `r dollar(countrySpaceAdvantage)` salary advantage to spaces.
+
+##Experience Counts!
+
+```{r}
+
+experience.sourceoutliers <- country.outliers
+experience.source <- country.report
+
+yearsProgram <- 
+  survey.source[!experience.sourceoutliers,]$YearsProgram %>% 
+  fct_explicit_na() %>% 
+  fct_recode(
+      "Less 1" = "(Missing)",
+      "Less 1" = "Less than a year", 
+      "1 year" = "1 to 2 years", 
+      "2 years" = "2 to 3 years", 
+      "3 years" = "3 to 4 years", 
+      "4 years" = "4 to 5 years", 
+      "5 years" = "5 to 6 years", 
+      "6 years" = "6 to 7 years", 
+      "7 years" = "7 to 8 years", 
+      "8 years" = "8 to 9 years", 
+      "9 years" = "9 to 10 years", 
+      "10 years" = "10 to 11 years", 
+      "11 years" = "11 to 12 years", 
+      "12 years" = "12 to 13 years", 
+      "13 years" = "13 to 14 years", 
+      "14 years" = "14 to 15 years", 
+      "15 years" = "15 to 16 years", 
+      "16 years" = "16 to 17 years", 
+      "17 years" = "17 to 18 years", 
+      "18 years" = "18 to 19 years", 
+      "19 years" = "19 to 20 years", 
+      "20 or more" = "20 or more years"
+  ) %>% 
+  factor(
+    levels = c(
+      "Less 1", 
+      "1 year", 
+      "2 years", 
+      "3 years", 
+      "4 years", 
+      "5 years", 
+      "6 years", 
+      "7 years", 
+      "8 years", 
+      "9 years", 
+      "10 years", 
+      "11 years", 
+      "12 years", 
+      "13 years", 
+      "14 years", 
+      "15 years", 
+      "16 years", 
+      "17 years", 
+      "18 years", 
+      "19 years", 
+      "20 or more"
+    ), ordered = TRUE)
+
+# Its convenient to have the years programming experience as a numeric as long as
+# we note the > 20 years category at the end,
+experience.years = c(
+  "(Missing)" = 0,
+  "Less than a year" = 0, 
+  "1 to 2 years" = 1, 
+  "2 to 3 years" = 2, 
+  "3 to 4 years" = 3, 
+  "4 to 5 years" = 4, 
+  "5 to 6 years" = 5, 
+  "6 to 7 years" = 6, 
+  "7 to 8 years" = 7, 
+  "8 to 9 years" = 8, 
+  "9 to 10 years" = 9, 
+  "10 to 11 years" = 10, 
+  "11 to 12 years" = 11, 
+  "12 to 13 years" = 12, 
+  "13 to 14 years" = 13, 
+  "14 to 15 years" = 14, 
+  "15 to 16 years" = 15, 
+  "16 to 17 years" = 16, 
+  "17 to 18 years" = 17, 
+  "18 to 19 years" = 18, 
+  "19 to 20 years" = 19, 
+  "20 or more years" = 20)
+
+experience <- 
+  survey.source[!experience.sourceoutliers,]$YearsProgram %>% 
+  fct_explicit_na("(Missing)") %>% 
+  map_dbl(~ experience.years[.])
+
+experience.source$yearsProgram <- yearsProgram
+experience.source$experience <- experience
+
+```
+
+```{r}
+salaryVsSpacesPlot(experience.source, "yearsProgram")
+```
+```{r}
+normalExperience <- levels(experience.source$yearsProgram)[10]
+sampleExperiences <- levels(experience.source$yearsProgram)[6:14]
+
+experience.outliers <- experience.sourceoutliers
+experience.report <- experience.source
+experience.report$experienceSalary <- normalizeSalary(experience.report, "yearsProgram", normalExperience)
+experience.report$salary <- experience.report$experienceSalary
+
+experienceTabSalary <- experience.report %>% filter(preferTabs) %>% .$salary %>% median() %>% round()
+experienceSpaceSalary <- experience.report %>% filter(preferSpaces) %>% .$salary %>% median() %>% round()
+experienceSpaceAdvantage <- experienceSpaceSalary - experienceTabSalary
+
+salaryVsGroupBoxPlot(experience.report, "yearsProgram")
+
+```
+The median country salary for programmers that prefer spaces is `r dollar(experienceSpaceSalary)` vs `r dollar(experienceTabSalary)` for those who prefer tabs. A `r dollar(experienceSpaceAdvantage)` salary advantage to spaces.
+
+##School Rules
+
+Perhaps education has to something to do with the mystery. Its reasonable to expect that a formal education has some an impact on salary and perhaps the preference has something to do with the tools used or formally taught practices. We can use the same median salary vs space/tab preference plot to see.
+
+```{r}
+
+education.sourceoutliers <- experience.outliers
+education.source <- experience.report
+
+formalEducation <- survey.source[!education.sourceoutliers,]$FormalEducation %>% fct_lump(prop = .02) %>% fct_recode(c("Partial degree" = "Some college/university study without earning a bachelor's degree"))
+
+education.source$formalEducation <- formalEducation
+
+salaryVsSpacesPlot(education.source, "formalEducation")
+
+```
+
+```{r}
+
+normalEducation <- "Bachelor's degree"
+education.outliers <- education.sourceoutliers
+education.report <- education.source
+
+education.report$educationSalary <- normalizeSalary(education.report, "formalEducation", normalEducation)
+education.report$salary <- education.report$educationSalary
+
+educationTabSalary <- education.report %>% filter(preferTabs) %>% .$salary %>% median() %>% round()
+educationSpaceSalary <- education.report %>% filter(preferSpaces) %>% .$salary %>% median() %>% round()
+educationSpaceAdvantage <- educationSpaceSalary - educationTabSalary
+
+```
+
+
+```{r}
+salaryVsGroupBoxPlot(education.report, "formalEducation")
+```
+
+The median country salary for programmers that prefer spaces is `r dollar(educationSpaceSalary)` vs `r dollar(educationTabSalary)` for those who prefer tabs. A `r dollar(educationSpaceAdvantage)` salary advantage to spaces.
+
+##Is coding about coding
+
+```{r}
+
+tech.sourceoutliers <- education.outliers
+#tech.source <- education.report
+
+#tech.sourceoutliers <- whitespace.outliers
+#tech.source <- whitespace.report
+
+quotemeta <- function(string) stringr::str_replace_all(string, "(\\W)", "\\\\\\1")
+tags <- function(.Object) .Object[!is.na(.Object)] %>% stri_split_fixed(";") %>% flatten() %>% stri_trim_both() %>% unique()
+asTags <- function(.Object, prefix) {
+  tags <- tags(.Object)
+  names <- paste0(prefix, tags)
+  tagValues <- function(.Object, tag) stri_detect_regex(.Object, stri_c("(^|\\s)", quotemeta(tag), "($|\\;)")) %>% Hmisc::impute(FALSE) %>% as.logical()
+  tags %>% map(tagValues, .Object = .Object) %>% set_names(names)
+}
+
+languagePrefix <- "Language_"
+frameworkPrefix  <- "Framework_"
+databasePrefix <- "DB_"
+platformPrefix <- "Platform_"
+idePrefix <- "IDE_"
+
+languageExperience <- asTags(survey.source[!tech.sourceoutliers,]$HaveWorkedLanguage, languagePrefix)
+frameworkExperience <- asTags(survey.source[!tech.sourceoutliers,]$HaveWorkedFramework, frameworkPrefix)
+databaseExperience <- asTags(survey.source[!tech.sourceoutliers,]$HaveWorkedDatabase, databasePrefix)
+platformExperience <- asTags(survey.source[!tech.sourceoutliers,]$HaveWorkedPlatform, platformPrefix)
+ideExperience <- asTags(survey.source[!tech.sourceoutliers,]$IDE, idePrefix)
+
+## Put everything together
+columns <- list(
+  languageExperience,
+  frameworkExperience,
+  databaseExperience,
+  platformExperience,
+  ideExperience
+) %>% flatten()
+tech.colnames <- make.names(names(columns))
+names(columns) <- tech.colnames
+tech.source <- education.report
+tech.source[tech.colnames] <- bind_cols(columns)
+
+techFamilies.count <- 5
+
+set.seed(7)
+tech.kmeans <- kmeans(tech.source[, tech.colnames], techFamilies.count, nstart = 20)
+
+tech.source$techFamily <- 
+  tech.kmeans$cluster %>% 
+  as.character() %>% 
+  as.factor() %>% 
+  fct_recode("Mobile" = "1", "Microsoft" = "2", "Open Source" = "3", "Java" = "4", "C" = "5")
+
+#Stats for tags must be evaluated seperately for each tag and bound together
+
+tagStat <- function(data, colName, tagColumn) {
+  stat <- data %>% 
+    filter_(sprintf("\`%s\`", tagColumn)) %>%
+    summarise(
+      count = n(), 
+      median_salary = median(salary), 
+      sd_salary = sd(salary),
+      preferSpaces = sum(preferSpaces) / n(),
+      techFamily = levels(techFamily)[which(table(techFamily) == max(table(techFamily)))[1]]
+    )
+
+  parts <- stri_split_fixed(str = tagColumn, pattern = "_")[[1]]
+  category <- parts[1]
+  name <- parts[2]
+  stat$name <- name
+  stat$category <- category
+  stat[[colName]] <- tagColumn
+  stat
+}
+
+tagColumns <- function(data, colPrefix) {
+  colnames(data)[stri_startswith_fixed(str = colnames(data), pattern = colPrefix)]
+}
+
+tagsStats <- function(data, colName, colPrefix) {
+  prefixStats <- function(prefix)
+    tagColumns(data, prefix) %>% 
+    map(tagStat, data = data, colName = colName)
+  stats <- colPrefix %>% map(prefixStats) %>% flatten() %>% bind_rows() %>% arrange(desc(count))
+  stats$techFamily <- as.factor(stats$techFamily)
+  stats
+}
+
+
+```
+
+## Programming language
+
+```{r}
+
+salaryVsSpacesClusterPlot <- function(data, groupVariable, stats = NULL, label = TRUE) {
+  if (is.null(stats))
+    stats <- stats(data, groupVariable)
+  p <- ggplot(stats, aes(x = preferSpaces, y = median_salary, size = count)) +
+    geom_smooth(method = "lm", se = FALSE, show.legend = FALSE) +
+    geom_count(aes(color = techFamily)) +
+    scale_size_area(name = "Respondents") +
+    scale_color_brewer(palette = "Set1") +
+    ylab("Median salary") +
+    xlab("Spaces preference") +
+    theme_minimal()
+  if (label)
+      p <- p + ggrepel::geom_text_repel(aes_string(label = groupVariable, color = "techFamily"), size = 3.5)
+  p
+}
+
+languageStats <- tagsStats(tech.source, "languageExperience", languagePrefix)
+salaryVsSpacesClusterPlot(tech.source, "name", languageStats)
+
+```
+
+## IDE
+
+```{r}
+ideStats <- tagsStats(tech.source, "ideExperience", idePrefix)
+salaryVsSpacesClusterPlot(tech.source, "name", ideStats)
+
+```
+
+## Platform
+
+```{r}
+platformStats <- tagsStats(tech.source, "platformExperience", platformPrefix)
+salaryVsSpacesClusterPlot(tech.source, "name", platformStats)
+
+```
+
+## Framework
+
+```{r}
+frameworkStats <- tagsStats(tech.source, "frameworkExperience", frameworkPrefix)
+salaryVsSpacesClusterPlot(tech.source, "name", frameworkStats)
+
+```
+
+## Database
+
+```{r}
+databaseStats <- tagsStats(tech.source, "databaseExperience", databasePrefix)
+salaryVsSpacesClusterPlot(tech.source, "name", databaseStats)
+
+```
+
+##Technology Combined
+
+```{r}
+
+
+technology.prefixes <- c(languagePrefix, idePrefix, frameworkPrefix, platformPrefix, databasePrefix)
+technology.stats <- tagsStats(tech.source, "technology", technology.prefixes)
+
+salaryVsSpacesClusterPlot(tech.source, "technology", technology.stats, label = FALSE)
+
+```
+
+```{r}
+commonTechnology.cutoff = 1000
+commonTechnology.stats <- technology.stats %>% filter(count > commonTechnology.cutoff)
+salaryVsSpacesClusterPlot(tech.source, "name", commonTechnology.stats)
+```
+
+```{r}
+salaryVsSpacesPlot(tech.source, "techFamily")
+```
+
+
+```{r}
+salaryVsGroupBoxPlot(tech.source, "techFamily")
+
+```
+
