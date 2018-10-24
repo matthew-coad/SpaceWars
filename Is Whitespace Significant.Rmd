@@ -1,0 +1,50 @@
+---
+title: "Is Whitespace Significant EMC"
+output: html_notebook
+---
+
+# Setup
+
+```{r}
+source("Scripts/survey_load.R")
+source("Scripts/SpaceWars_Utility.R")
+source("Scripts/is_space_significant.R")
+start_cluster()
+```
+
+# List Algorithms 
+
+```{r}
+emc_algorithms() %>% filter(core, regression)
+```
+
+
+# Check PLS accuracy for test algorithms
+
+```{r}
+space_sig_parameters <- get_space_sig_parameters(
+    c("null", "lm", "glmnet", "earth", "svmRadial"),
+    preprocess = get_space_sig_preprocess()
+)
+space_sig_parameters
+```
+
+Run job
+
+```{r}
+space_sig_emc <- run_space_sig(space_sig_parameters)
+space_sig_status(space_sig_emc)
+```
+
+
+Plot Resamples
+
+```{r}
+as_space_sig_resamples(space_sig_emc) %>%
+    filter(algorithm != "null") %>%
+    ggplot(aes(x = algorithm, y = RMSE, color = treatment)) +
+    geom_boxplot() +
+    scale_y_continuous(trans = "reverse")
+```
+
+
